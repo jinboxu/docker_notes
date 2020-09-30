@@ -52,3 +52,16 @@ ExecStart=/usr/bin/dockerd --graph /data/tools/docker
 - 查看日志:  "Error while creating filesystem xfs on device docker-253:4-17133027-base: exit status 1  storage-driver=devicemapper"
 - 解决办法: ```yum install xfsprogs```
 
+
+
+#### 普通用户使用docker
+
+将普通用户添加到docker组并重启docker服务:
+
+```shell
+# groupadd docker
+# usermod -aG docker {USER}
+# systemctl restart docker
+```
+
+> 也可不必重启docker服务，手动附加权限即可。重启docker服务将重新生成的/var/run/docker.sock的所属组改为了docker
