@@ -8,6 +8,8 @@ Docker Swarm:   https://docs.docker.com/engine/swarm/
 
 Compose文件:    https://docs.docker.com/compose/compose-file/#configs
 
+​                             https://docs.docker.com/compose/compose-file/compose-file-v3/       新
+
 
 
 #### 1. zabbix
@@ -382,3 +384,251 @@ networks:
 > ```
 >
 > > 脚本通过判断ENV_MODE环境变量是否存在，进而影响eureka服务直接的相互注册
+
+
+
+
+
+#### 3. elasticsearch和kibana
+
+参考手册:
+
+```
+https://www.elastic.co/guide/en/elasticsearch/reference/index.html
+https://www.elastic.co/guide/en/kibana/current/index.html
+```
+
+
+
+###### 3.1 准备工作
+
+1. The `vm.max_map_count` kernel setting needs to be set to at least `262144` for production use. 
+
+```
+$ grep vm.max_map_count /etc/sysctl.conf
+vm.max_map_count=262144
+```
+
+2. 修改各个节点的ulimits(注意，swarm集群方式下不能直接对ulimit进行修改)
+3. 创建elasticsearch运行节点的目录并给予读写权限
+
+```shell
+$ cd /data
+$ mkdir esdatadir
+$ cd esdatadir && mkdir data logs
+$ chmod 777 data logs   # 容器数据和日志目录
+```
+
+
+
+###### 3.2 elasticsearch、kibana以及nginx代理
+
+```yaml
+# stack文件清单:
+elasticsearch-kibana
+- ek-stack.yaml
+- kibana_proxy.conf
+- password_file
+- readme.md
+```
+
+
+
+ek-stack.yaml :
+
+```yaml
+version: '3.7'
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.13
+    hostname: es01
+    environment:
+      - node.name=es01
+      - cluster.name=es-swarm-cluster
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      #- bootstrap.memory_lock=true
+      - bootstrap.system_call_filter=false
+      - network.host=192.168.10.3
+      - discovery.zen.minimum_master_nodes=2
+      - discovery.zen.ping.unicast.hosts=es01,es02,es03
+    extra_hosts:
+      - "es01:192.168.10.3"
+      - "es02:192.168.1.4"
+      - "es03:192.168.1.12"
+    volumes:
+      - /data/esdatadir/data:/usr/share/elasticsearch/data
+      - /data/esdatadir/logs:/usr/share/elasticsearch/logs
+    networks:
+      hostnet: {}
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname==manager1"
+      resources:
+       limits:
+         cpus: '4'
+         memory: 6G
+       reservations:
+         cpus: '2'
+         memory: 4G
+
+  es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.13
+    hostname: es02
+    environment:
+      - node.name=es02
+      - cluster.name=es-swarm-cluster
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      #- bootstrap.memory_lock=true
+      - bootstrap.system_call_filter=false
+      - network.host=192.168.1.4
+      - discovery.zen.minimum_master_nodes=2
+      - discovery.zen.ping.unicast.hosts=es01,es02,es03
+    extra_hosts:
+      - "es01:192.168.10.3"
+      - "es02:192.168.1.4"
+      - "es03:192.168.1.12"
+    volumes:
+      - /data/esdatadir/data:/usr/share/elasticsearch/data
+      - /data/esdatadir/logs:/usr/share/elasticsearch/logs
+    networks:
+      hostnet: {}
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname==work1"
+      resources:
+       limits:
+         cpus: '4'
+         memory: 6G
+       reservations:
+         cpus: '2'
+         memory: 4G
+
+  es03:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.13
+    hostname: es03
+    environment:
+      - node.name=es03
+      - cluster.name=es-swarm-cluster
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      #- bootstrap.memory_lock=true
+      - bootstrap.system_call_filter=false
+      - network.host=192.168.1.12
+      - discovery.zen.minimum_master_nodes=2
+      - discovery.zen.ping.unicast.hosts=es01,es02,es03
+    extra_hosts:
+      - "es01:192.168.10.3"
+      - "es02:192.168.1.4"
+      - "es03:192.168.1.12"
+    volumes:
+      - /data/esdatadir/data:/usr/share/elasticsearch/data
+      - /data/esdatadir/logs:/usr/share/elasticsearch/logs
+    networks:
+      hostnet: {}
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname==work2"
+      resources:
+       limits:
+         cpus: '4'
+         memory: 6G
+       reservations:
+         cpus: '2'
+         memory: 4G
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:6.8.13
+    networks:
+      - kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://192.168.1.4:9200
+    #ports:
+    #  - 5601:5601
+    deploy:
+      resources:
+       limits:
+         cpus: '1'
+         memory: 1G
+       reservations:
+         cpus: '0.2'
+         memory: 200m
+
+
+  nginx:
+    image: nginx:1.18.0
+    networks:
+      - kibana
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+      - source: nginx_passwd
+        target: /usr/local/src/nginx/passwd
+    ports:
+      - 8081:80
+
+configs:
+  nginx_conf:
+    file: ./kibana_proxy.conf
+  nginx_passwd:
+    file: ./password_file
+
+networks:
+  hostnet:
+    external: true
+    name: host
+  kibana:
+    driver: overlay
+    attachable: true
+```
+
+> dockerfiles:   https://github.com/elastic/dockerfiles/tree/v6.8.13
+
+
+
+kibana_proxy.conf :
+
+```
+server {
+    listen 80;
+    server_name kibana-swarm.qhgctech.com;
+
+    auth_basic "Please input password";
+    auth_basic_user_file /usr/local/src/nginx/passwd;
+
+    location / {
+        proxy_pass http://kibana:5601;
+    }
+
+}
+```
+
+
+
+通过openssl创建nginx的用户密码文件:
+
+````shell
+$ echo -n 'kibana-swarm:' > password_file
+$ openssl passwd 'abc123456' >> password_file
+````
+
+
+
+创建或更新服务:
+
+```shell
+$ docker stack deploy -c ek-stack.yaml elasticsearch-kibana
+```
+
+
+
+使用注意:
+
+- 通过环境变量的设置并没有更新容器的配置文件
+- elasticsearch的JVM heap内存在容器里面看到的总是1G，但实际是生效的
+
+
+
+
+

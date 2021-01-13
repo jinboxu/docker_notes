@@ -1,5 +1,7 @@
 ## docker安装
 
+#### 1. 安装
+
 **参考文档： https://www.runoob.com/docker/centos-docker-install.html**
 
 **设置仓库**
@@ -54,7 +56,7 @@ ExecStart=/usr/bin/dockerd --graph /data/tools/docker
 
 
 
-#### 普通用户使用docker
+**普通用户使用docker**
 
 将普通用户添加到docker组并重启docker服务:
 
@@ -65,3 +67,69 @@ ExecStart=/usr/bin/dockerd --graph /data/tools/docker
 ```
 
 > 也可不必重启docker服务，手动附加权限即可。重启docker服务将重新生成的/var/run/docker.sock的所属组改为了docker
+
+
+
+#### 2. 二进制安装
+
+```shell
+# tar zxf docker-18.06.3-ce.tag         //将安装包传到服务器上并解压
+# cd docker  &&  cp docker*  /usr/bin   //将解压的包复制到程序启动默认的环境变量路径下
+
+## 设置docker参数
+# mkdir /etc/docker
+# cat daemon.json   //创建daemon.json文件，内容如下
+{
+ "log-driver":"json-file",
+ "log-opts": {
+  "max-size":"20m",
+  "max-file": "3"
+ },
+ "storage-driver": "overlay2"
+}
+
+## 开启数据包转发
+# cat /etc/sysctl.d/docker.conf  //新建docker.conf文件，内容如下（具体原因网上查阅）
+## for docker 
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-arptables = 1
+# sysctl -p /etc/sysctl.d/docker.conf   //加载
+//Linux系统默认是禁止数据包转发的。所谓转发即当主机拥有多于一块的网卡时，其中一块收到数据包，根据数据包的目的ip地址将数据包发往本机另一块网卡，该网卡根据路由表继续发送数据包。这通常是路由器所要实现的功能.//
+
+## 使用system管理docker
+## 启动docker之前，我们先单独为docker数据创建一个存储卷。docker默认的存储路径为/var/lib/docker目录下面，由于我们系统盘过小，所以单独将docker数据另外存储。
+# 略，创建数据卷
+# cat /usr/lib/systemd/systemd/system/docker.service
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target firewalld.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/dockerd --graph /data/docker    //将/data/docker目录作为docker的数据目录
+ExecReload=/bin/kill -s HUP $MAINPID
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TimeoutStartSec=0
+Delegate=yes
+KillMode=process
+Restart=on-failure
+StartLimitBurst=3
+StartLimitInterval=60s
+
+[Install]
+WantedBy=multi-user.target
+# systemctl daemon-reload
+# systemctl restart docker
+# systemctl enable  docker
+```
+
+> docker.service文件可参考yum安装生成的
+
+
+

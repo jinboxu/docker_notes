@@ -4,14 +4,36 @@
 
 
 
+#### 命令补全
 
-
-docker命令自动补全:
+- docker命令自动补全:
 
 ```
 # yum -y install bash-completion
 # source /usr/share/bash-completion/bash_completion
 ```
+
+
+
+- 二进制安装的docker命令补全
+
+通过yum安装相同版本的docker。将 /usr/share/bash-completion/completions/docker 文件拷贝到二进制安装的docker服务器上的 /usr/share/bash-completion/completions/ 目录下
+
+
+
+加载生效
+
+```shell
+# source /usr/share/bash-completion/completions/docker   #bash-completion已安装
+```
+
+或
+
+```shell
+# source /usr/share/bash-completion/bash_completion
+```
+
+
 
 
 
