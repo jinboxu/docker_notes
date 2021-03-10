@@ -314,3 +314,12 @@ Ingress  Load  Balancing实现方式:
 
 
 
+![SwarmLB2](pics\SwarmLB2.png)
+
+> ingress流量和应用之间的流量分开
+
+
+
+查看容器的网络命名空间:
+
+![容器网络](pics\容器网络.jpg)
