@@ -308,7 +308,7 @@ Ingress  Load  Balancing实现方式:
 
 
 
-#### 补充
+#### 自定义的overlay网络结构
 
 上面通过部署一个service使用**默认的ingress  overlay网络**做的演示，如果这个服务有一个自己的overlay网络呢？
 
@@ -323,3 +323,14 @@ Ingress  Load  Balancing实现方式:
 查看容器的网络命名空间:
 
 ![容器网络](pics\容器网络.jpg)
+
+
+
+#### 服务发现和负载均衡原理
+
+该文档已经描述的很清晰:  https://cloud.tencent.com/developer/article/1167580
+
+> 该文档的最后一张图'client'容器veth接口应该连到Overlay而不应该是ingress
+
+
+

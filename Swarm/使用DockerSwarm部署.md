@@ -12,6 +12,10 @@ Compose文件:    https://docs.docker.com/compose/compose-file/#configs
 
 
 
+以下stack file不一定是最终的资源文件，实际使用的资源清单我已经集中放在仓库xxx
+
+
+
 #### 1. zabbix
 
 dockerhub:       https://hub.docker.com/r/zabbix/zabbix-server-mysql/
@@ -645,6 +649,255 @@ $ docker stack deploy -c ek-stack.yaml elasticsearch-kibana
 
 - 通过环境变量的设置并没有更新容器的配置文件
 - elasticsearch的JVM heap内存在容器里面看到的总是1G，但实际是生效的
+
+
+
+
+
+#### 4. prometheus in swarm
+
+```yaml
+version: '3.7'
+
+services:
+  cadvisor:
+    image: google/cadvisor
+    #labels:
+    #  prometheus-job: 'cadvisor'
+    networks:
+      - net
+    command: -logtostderr -docker_only
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    deploy:
+      mode: global
+      labels:
+        prometheus-job: 'cadvisor'
+        prometheus.io/port: '8080'
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  grafana:
+    #image: stefanprodan/swarmprom-grafana:5.3.4
+    image: docker-hub.qhgctech.com/basic/grafana:27a2e8121b
+    networks:
+      - net
+    environment:
+      - GF_SECURITY_ADMIN_USER=${ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      #- GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-localhost}
+      #- GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      #- GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-grafana@test.com}
+      #- GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Grafana}
+      #- GF_SMTP_HOST=${GF_SMTP_HOST:-smtp:25}
+      #- GF_SMTP_USER=${GF_SMTP_USER}
+      #- GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
+    volumes:
+      - grafana:/var/lib/grafana
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  alertmanager:
+    image: prom/alertmanager:v0.21.0
+    #image: prom/alertmanager:v0.16.2
+    networks:
+      - net
+    #environment:
+    #  - SLACK_URL=${SLACK_URL:-https://hooks.slack.com/services/TOKEN}
+    #  - SLACK_CHANNEL=${SLACK_CHANNEL:-general}
+    #  - SLACK_USER=${SLACK_USER:-alertmanager}
+    configs:
+      - source: alertmanager_config
+        #target: /tmp/alertmanager.yml
+        target: /etc/alertmanager/alertmanager.yml
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - alertmanager:/alertmanager
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  #unsee:
+  #  image: cloudflare/unsee:v0.9.2
+  #  networks:
+  #    - net
+  #  environment:
+  #    ALERTMANAGER_URIS: 'default:http://alertmanager:9093'
+  #    #- "ALERTMANAGER_URIS=default:http://alertmanager:9093"
+  #  deploy:
+  #    mode: replicated
+  #    replicas: 1
+
+  svc-alertmanager-wechatbot-webhook:
+    image: registry.qhgctech.com/basic/alertmanager-wechatbot-webhook
+    networks:
+      - net
+    configs:
+      - source: wechatbot-webhook-template
+        target: /conf/wechat.tmpl
+    environment:
+      -  template_path=/conf/wechat.tmpl
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 256M
+
+
+  # 使用新版的prometheus以支持swarm服务发现,同时将需要经常改变的配置文件(prometheus.yml和*.rule)定义到持久卷
+  prometheus:
+    #image: stefanprodan/swarmprom-prometheus:v2.5.0
+    image: prom/prometheus:v2.25.0
+    networks:
+      - net
+    command:
+      #- '--config.file=/etc/prometheus/prometheus.yml'
+      - '--config.file=/prometheus/conf/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention=${PROMETHEUS_RETENTION:-24h}'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      #- prometheus:/prometheus
+      - /data/promdatadir/promtheusdata-and-conf:/prometheus
+      - /var/run/docker.sock:/var/run/docker.sock
+    #configs:
+    #  - source: node_rules
+    #    target: /etc/prometheus/swarm_node.rules.yml
+    #  - source: task_rules
+    #    target: /etc/prometheus/swarm_task.rules.yml
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 128M
+
+
+  nginx:
+    image: nginx:1.18.0
+    networks:
+      - net
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/conf.d/default.conf
+      - source: nginx_passwd
+        target: /usr/local/src/nginx/passwd
+    ports:
+      - 8083:80
+
+
+networks:
+  net:
+    driver: overlay
+    attachable: true
+
+volumes:
+    grafana:
+      driver_opts:
+        type: "nfs"
+        o: "addr=192.168.10.3,rw"
+        device: ":/nfs_data/monitoring-grafana"
+
+    alertmanager:
+      driver_opts:
+        type: "nfs"
+        o: "addr=192.168.10.3,rw"
+        device: ":/nfs_data/monitoring-alertmanager"
+
+
+configs:
+  alertmanager_config:
+    file: ./alertmanager/alertmanager.yml
+  wechatbot-webhook-template:
+    file: ./webhook/wechat.tmpl
+  nginx_conf:
+    file: ./nginx/proxy.conf
+  nginx_passwd:
+    file: ./nginx/password_file
+```
+
+> - grafana可以单独放在一个stack下，通过连接各个overlay网络来使用
+> - prometheus比较新的版本才支持swarm的服务发现`dockerswarm_sd_config`，同时将其配置文件放在映射的宿主机卷下
+> - (通过服务标签采集我在另一份文档中解释)
+> - unsee不支持v2版本的prometheus接口，所以没有使用
+
+
+
+```cat nginx/proxy.conf```:
+
+```
+server {
+    listen 80;
+    server_name 0.0.0.0;
+
+    auth_basic "Please input password";
+    auth_basic_user_file /usr/local/src/nginx/passwd;
+
+    location / {
+        resolver 127.0.0.11 valid=60s;
+        set $prometheus http://prometheus:9090;
+        set $alertmanager http://alertmanager:9093;
+
+        if ( $host = 'swarm-monitoring-prometheus.qhgctech.com' ) {
+            proxy_pass $prometheus;
+        }
+
+        if ( $host = 'swarm-monitoring-alertmanager.qhgctech.com' ) {
+            proxy_pass $alertmanager;
+        }
+
+
+    }
+}
+
+
+server {
+    listen 80;
+    server_name swarm-monitoring-grafana.qhgctech.com;
+
+    location / {
+        resolver 127.0.0.11 valid=60s;
+        set $grafana http://grafana:3000;
+
+        proxy_pass $grafana;
+    }
+}
+```
+
+- 通过不同的host路由，因为grafana自带有认证机制，所以将其单独列出到一个service块
+- nginx容器做反向代理的问题已经在 '问题记录' 文档描述
+
+
 
 
 
