@@ -161,7 +161,13 @@ services:
         memory: 2G
       reservations:
         cpus: '1'
-        memory: 512M    
+        memory: 512M  
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100"]
+      start_period: 20s
+      interval: 10s
+      timeout: 2s
+      retries: 2 
 
   eureka-1:
     image: docker-hub.qhgctech.com/work-order-dev/eureka-server:b6a6ea8
@@ -181,6 +187,12 @@ services:
       reservations:
         cpus: '1'
         memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100"]
+      start_period: 20s
+      interval: 10s
+      timeout: 2s
+      retries: 2 
 
   eureka-2:
     image: docker-hub.qhgctech.com/work-order-dev/eureka-server:b6a6ea8
@@ -200,6 +212,12 @@ services:
       reservations:
         cpus: '1'
         memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100"]
+      start_period: 20s
+      interval: 10s
+      timeout: 2s
+      retries: 2 
 
   gateway-server:
     image: docker-hub.qhgctech.com/work-order-dev/gateway-server:b6a6ea8

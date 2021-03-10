@@ -53,6 +53,88 @@ nsenter命令是一个可以在指定进程的命令空间下运行指定程序�
 
 
 
+namespace是Linux中一些进程的属性的作用域，使用命名空间，可以隔离不同的进程。
+
+Linux在不断的添加命名空间，目前有：
+
+- mount：挂载命名空间，使进程有一个独立的挂载文件系统，始于Linux 2.4.19
+- ipc：ipc命名空间，使进程有一个独立的ipc，包括消息队列，共享内存和信号量，始于Linux 2.6.19
+- uts：uts命名空间，使进程有一个独立的hostname和domainname，始于Linux 2.6.19
+- net：network命令空间，使进程有一个独立的网络栈，始于Linux 2.6.24
+- pid：pid命名空间，使进程有一个独立的pid空间，始于Linux 2.6.24
+- user：user命名空间，是进程有一个独立的user空间，始于Linux 2.6.23，结束于Linux 3.8
+- cgroup：cgroup命名空间，使进程有一个独立的cgroup控制组，始于Linux 4.6
+
+Linux的每个进程都具有命名空间，可以在/proc/PID/ns目录中看到命名空间的文件描述符。
+
+
+
+通过nsenter查看容器相关命名空间:
+
+```shell
+## 1. 查看网络命名空间的信息
+[root@work1 ~]# docker inspect 1c9f | grep Sandbox
+            "SandboxID": "7bc9e0f961e033a22e71cfb699b5df6a05c6269677d4a1df680215820cb76f4d",
+            "SandboxKey": "/var/run/docker/netns/7bc9e0f961e0",
+[root@work1 ~]# nsenter --net=/var/run/docker/netns/7bc9e0f961e0 ip a
+...略
+
+## 2. 查看进程相关的命名空间信息
+[root@work1 ~]# docker inspect 1c9f | grep Pid
+            "Pid": 25536,
+            "PidMode": "",
+            "PidsLimit": 0,
+[root@work1 ~]# nsenter -t 25536 --uts --ipc --net --pid 
+[root@1c9f6b7182dd ~]# ip a
+...略
+```
+
+
+
+
+
+#### ip netns命令
+
+ip netns 命令是用来管理 网络命名空间 的，网络命名空间可以实现 网络隔离。每个网络命名空间都提供了一个完全独立的网络协议栈，包括网络设备接口、IPV4 和 IPV6 协议栈、IP路由表、防火墙规则、端口、sockets 等。像 docker 就是利用 Linux 的网络命名空间来实现容器网络的隔离。
+
+
+当 docker 容器被创建出来后，你会发现使用 ip netns 命令无法看到容器对应的网络命名空间。这是因为 ip netns 命令是从 /var/run/netns 文件夹中读取内容的
+
+```shell
+## 1. 映射docker容器的网络命名空间
+ln -s /var/run/docker/netns /var/run/netns
+
+## 2.映射一个容器的网络命名空间
+docker inspect 1c9f | grep Pid               //获取容器进程ip，在容器命名空间中进程ID为1
+ln -s /proc/25536/ns/net /var/run/netns/web
+```
+
+
+
+通过ip netns进入网络命名空间查看:
+
+```shell
+[root@work1 ~]# ls /var/run/netns/   //web是一个目录软链接
+1-czfcsmphml  1-stp12d6o10  6f4219f474bb  7bc9e0f961e0  9e86cce7038c  default  f20587e335c0  ingress_sbox  web
+[root@work1 ~]# ip netns ls     //可以看到有两个id是一样的
+web (id: 5)
+7bc9e0f961e0 (id: 5)
+9e86cce7038c (id: 6)
+6f4219f474bb (id: 4)
+1-stp12d6o10 (id: 2)
+f20587e335c0 (id: 3)
+1-czfcsmphml (id: 0)
+ingress_sbox (id: 1)
+default
+[root@work1 ~]# 
+```
+
+> 分别通过```ip netns exec web bash```和```ip netns exec 7bc9e0f961e0 bash```进入查看到他们的网络命名空间是一样的
+
+
+
+
+
 #### swarm网络
 
 参考文档:   https://www.jianshu.com/p/249fd33bd4fe
@@ -152,7 +234,7 @@ $ docker run -d --name busybox3 --net overlay_test busybox sleep 36000
 
 > 可见47接口处于1-6ttr438f3y这个namespace中(同样，另外一个容器busybox3在其所在的节点上也像这样查看)
 >
-> **在这个namespace中，有一个vxlan出口。docker overlsy就是通过overlay隧道与其它容器通信的。**
+> **在这个namespace中，有一个vxlan出口。docker overlay就是通过overlay隧道与其它容器通信的。**
 >
 > **两个容器虽然是通过vxlan隧道通信，但容器内部却不感知。它们只能看到两个容器处于同一个二层网络中。由vxlan接口将二层报文封装在UDP报文的payload中，发到对端，再由对端的vxlan接口解封装**
 
@@ -223,6 +305,12 @@ Ingress  Load  Balancing实现方式:
 主机端口8080 => Ingress-sbox-VIP:8080 => 容器Ingress-sbox => IPVS分发到containers。
 
 > 大家可以看到访问主机之后数据包流到了一个特殊的Sandbox容器里， 这个容器和我们的容器共享一个Ingress网络，通过Iptables和IPVS等重定向到了最终容器之上。 达到了服务在任何一台主机的8090端口都可达的目的。
+
+
+
+#### 补充
+
+上面通过部署一个service使用**默认的ingress  overlay网络**做的演示，如果这个服务有一个自己的overlay网络呢？
 
 
 
